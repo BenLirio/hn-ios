@@ -87,6 +87,10 @@ struct StoriesView: View {
         do {
             stories = try await HNClient.topStories()
             error = nil
+            if ProcessInfo.processInfo.arguments.contains("-autoExplain"), commentsStory == nil {
+                commentsStory = stories.first
+                netlog("autoExplain: opening \(stories.first?.id ?? 0)")
+            }
         } catch {
             self.error = error.localizedDescription
         }

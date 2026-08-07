@@ -159,7 +159,13 @@ struct ExplainerCell: View {
         .fullScreenCover(item: $pageURL) { item in
             SafariView(url: item.url).ignoresSafeArea()
         }
-        .onDisappear { pollTask?.cancel() }
+        .onAppear {
+            // Debug hook: `devicectl ... launch com.benlirio.hn -autoExplain`
+            // exercises the exact tap path without touching the screen.
+            if ProcessInfo.processInfo.arguments.contains("-autoExplain"), case .idle = state {
+                startPolling()
+            }
+        }
     }
 
     private func elapsedText(_ seconds: Int) -> String {
@@ -167,6 +173,7 @@ struct ExplainerCell: View {
     }
 
     private func startPolling() {
+        netlog("startPolling story=\(storyID)")
         state = .working(HNClient.Progress(stage: "contacting server", step: 1, steps: 5, elapsed: 0))
         pollTask?.cancel()
         pollTask = Task {
@@ -183,6 +190,9 @@ struct ExplainerCell: View {
                         state = .failed(message)
                         return
                     }
+                } catch is CancellationError {
+                    netlog("poll cancelled story=\(storyID)")
+                    return
                 } catch {
                     state = .failed("Couldn't reach the Mac mini (is Tailscale connected?): \(error.localizedDescription)")
                     return
