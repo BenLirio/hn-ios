@@ -76,7 +76,18 @@ def html_to_text(html):
 
 
 def fetch_article_text(url):
-    """Render the page in headless Chrome so JS-built pages work too."""
+    """Render in headless Chrome (so JS-built pages work), with a plain
+    HTTP fetch as fallback when Chrome hangs on a page."""
+    try:
+        return chrome_dump(url)
+    except Exception as e:
+        print(f"chrome failed on {url}: {e}; falling back to plain fetch", flush=True)
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return html_to_text(resp.read().decode("utf-8", "replace"))[:ARTICLE_CHAR_LIMIT]
+
+
+def chrome_dump(url):
     with tempfile.TemporaryDirectory() as profile:
         result = subprocess.run(
             [
@@ -94,9 +105,12 @@ def fetch_article_text(url):
             ],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=45,
         )
-    return html_to_text(result.stdout)[:ARTICLE_CHAR_LIMIT]
+    text = html_to_text(result.stdout)[:ARTICLE_CHAR_LIMIT]
+    if not text.strip():
+        raise RuntimeError("empty DOM dump")
+    return text
 
 
 def fetch_story(story_id):
