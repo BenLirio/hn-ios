@@ -38,22 +38,29 @@ enum HNClient {
         return try JSONDecoder().decode(Story.self, from: data)
     }
 
-    // Personal summary server (server/ in this repo) running on the Mac mini,
-    // reachable over Tailscale. Cold summaries take up to a minute or two.
-    static let summaryBase = URL(string: "http://bens-mac-mini.tailab3f3c.ts.net:8434")!
+    // Personal explainer server (server/ in this repo) running on the Mac mini,
+    // reachable over Tailscale. Generation runs in the background there; the
+    // app polls status until the interactive page is ready.
+    static let serverBase = URL(string: "http://bens-mac-mini.tailab3f3c.ts.net:8434")!
 
-    static func summary(storyID: Int) async throws -> String {
-        var request = URLRequest(url: summaryBase.appending(path: "summary/\(storyID)"))
-        request.timeoutInterval = 180
-        let (data, response) = try await URLSession.shared.data(for: request)
-        struct SummaryResponse: Decodable { let summary: String?; let error: String? }
-        let decoded = try JSONDecoder().decode(SummaryResponse.self, from: data)
-        guard (response as? HTTPURLResponse)?.statusCode == 200, let summary = decoded.summary else {
-            throw NSError(domain: "HN", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: decoded.error ?? "Summary server error",
-            ])
+    enum ExplainerStatus {
+        case working(String)
+        case ready(URL)
+        case failed(String)
+    }
+
+    static func explainerStatus(storyID: Int) async throws -> ExplainerStatus {
+        let (data, _) = try await URLSession.shared.data(from: serverBase.appending(path: "explainer/\(storyID)"))
+        struct Response: Decodable { let status: String; let stage: String?; let error: String? }
+        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        switch decoded.status {
+        case "ready":
+            return .ready(serverBase.appending(path: "explainer/\(storyID)/html"))
+        case "working":
+            return .working(decoded.stage ?? "working")
+        default:
+            return .failed(decoded.error ?? "Unknown server error")
         }
-        return summary
     }
 
     // Fetched via the Algolia HN API: one request returns the whole comment tree,

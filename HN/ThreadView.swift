@@ -34,7 +34,7 @@ struct ThreadRootView: View {
             }
 
             Section {
-                SummaryCell(storyID: story.id)
+                ExplainerCell(storyID: story.id)
             }
 
             if let comments {
@@ -95,67 +95,85 @@ struct ThreadView: View {
     }
 }
 
-struct SummaryCell: View {
+// Triggers the Mac mini to generate an interactive visual explainer of the
+// article + discussion, polls until it's ready, then opens it full screen.
+struct ExplainerCell: View {
     let storyID: Int
-    @State private var state = SummaryState.idle
+    @State private var state = ExplainerState.idle
+    @State private var pageURL: IdentifiableURL?
+    @State private var pollTask: Task<Void, Never>?
 
-    enum SummaryState {
-        case idle, loading, loaded(AttributedString), failed(String)
+    enum ExplainerState {
+        case idle, working(String), ready(URL), failed(String)
     }
 
     var body: some View {
-        switch state {
-        case .idle:
-            Button {
-                Task { await load() }
-            } label: {
-                Label("Summarize article & comments", systemImage: "sparkles")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.orange)
-            }
-            .buttonStyle(.borderless)
-        case .loading:
-            HStack(spacing: 10) {
-                ProgressView()
-                Text("Summarizing — first time can take a minute…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        case .loaded(let summary):
-            VStack(alignment: .leading, spacing: 6) {
-                Label("AI Summary", systemImage: "sparkles")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
-                Text(summary)
-                    .font(.subheadline)
-            }
-            .padding(.vertical, 4)
-        case .failed(let message):
-            VStack(alignment: .leading, spacing: 6) {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Retry", systemImage: "arrow.clockwise") {
-                    Task { await load() }
+        Group {
+            switch state {
+            case .idle:
+                Button(action: startPolling) {
+                    Label("Explain this visually", systemImage: "sparkles")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.orange)
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.orange)
                 .buttonStyle(.borderless)
+            case .working(let stage):
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Building your explainer: \(stage)…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            case .ready(let url):
+                Button {
+                    pageURL = IdentifiableURL(url: url)
+                } label: {
+                    Label("Open visual explainer", systemImage: "sparkles.rectangle.stack")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.borderless)
+            case .failed(let message):
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Retry", systemImage: "arrow.clockwise", action: startPolling)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .buttonStyle(.borderless)
+                }
             }
         }
+        .fullScreenCover(item: $pageURL) { item in
+            SafariView(url: item.url).ignoresSafeArea()
+        }
+        .onDisappear { pollTask?.cancel() }
     }
 
-    private func load() async {
-        state = .loading
-        do {
-            let raw = try await HNClient.summary(storyID: storyID)
-            let markdown = raw
-                .replacingOccurrences(of: "ARTICLE:", with: "**Article**")
-                .replacingOccurrences(of: "DISCUSSION:", with: "**Discussion**")
-            let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-            state = .loaded((try? AttributedString(markdown: markdown, options: options)) ?? AttributedString(raw))
-        } catch {
-            state = .failed("Couldn't reach the summary server (is the Mac mini on Tailscale?): \(error.localizedDescription)")
+    private func startPolling() {
+        state = .working("starting")
+        pollTask?.cancel()
+        pollTask = Task {
+            while !Task.isCancelled {
+                do {
+                    switch try await HNClient.explainerStatus(storyID: storyID) {
+                    case .ready(let url):
+                        state = .ready(url)
+                        pageURL = IdentifiableURL(url: url)
+                        return
+                    case .working(let stage):
+                        state = .working(stage)
+                    case .failed(let message):
+                        state = .failed(message)
+                        return
+                    }
+                } catch {
+                    state = .failed("Couldn't reach the Mac mini (is Tailscale connected?): \(error.localizedDescription)")
+                    return
+                }
+                try? await Task.sleep(for: .seconds(4))
+            }
         }
     }
 }

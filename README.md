@@ -15,16 +15,30 @@ A super minimal iOS Hacker News reader — a thin SwiftUI wrapper around the
   [Algolia HN API](https://hn.algolia.com/api))
 - Links inside comments open in the in-app Safari view
 - Pull to refresh
-- "Summarize article & comments" button: an AI summary served by a personal
-  summary server (see below)
+- "Explain this visually" button: generates a fun, interactive single-file
+  web page explaining the article + discussion, served by a personal
+  explainer server (see below) and opened full screen in the app
 
-## Summary server
+## Explainer server
 
 `server/server.py` is a zero-dependency Python 3 server meant to run on a
-Mac on the same Tailscale tailnet. `GET /summary/<story_id>` renders the
-article in headless Chrome (`--headless --dump-dom`, so JS-heavy pages work),
-pulls the comment tree from Algolia, summarizes both with OpenAI
-(`gpt-5-mini`), and caches the result in `server/cache/`.
+Mac on the same Tailscale tailnet. When the app requests
+`GET /explainer/<story_id>`, generation starts in the background and the app
+polls the same endpoint until `{"status": "ready"}`, then loads
+`/explainer/<story_id>/html`.
+
+The pipeline:
+
+1. The article is rendered in headless Chrome (`--headless --dump-dom`, so
+   JS-built pages work) and reduced to text
+2. **All** comments are used, no matter how many: whole threads are packed
+   into ~18k-char chunks and compressed in parallel by a small model
+   (`gpt-5.4-mini`) into dense digests — map-reduce instead of truncation
+3. The article text + digests go to a big model (`gpt-5.5`), which writes a
+   self-contained interactive HTML page (inline CSS/JS, mobile-first,
+   dark-mode aware): visual explanations of the article's ideas plus a
+   "The Discussion" section mapping the camps and arguments
+4. Pages are cached in `server/cache/`, so each story costs one generation
 
 Setup on the server machine:
 
@@ -32,7 +46,7 @@ Setup on the server machine:
 2. Run it as a launchd service (label `com.benlirio.hn-summary`) pointing at
    `python3 server/server.py`; it listens on port 8434
 3. The app reaches it at `http://bens-mac-mini.tailab3f3c.ts.net:8434` — the
-   Tailscale MagicDNS name is hardcoded in `HNClient.summaryBase`, and
+   Tailscale MagicDNS name is hardcoded in `HNClient.serverBase`, and
    `Info.plist` carries an App Transport Security exception for `ts.net`
    (plain HTTP inside the tailnet)
 
