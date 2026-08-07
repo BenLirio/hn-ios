@@ -5,10 +5,15 @@ A super minimal iOS Hacker News reader — a thin SwiftUI wrapper around the
 
 ## Features
 
-- Top 50 stories with points, author, age, comment count, and domain
-- Tap a story to read the article in an in-app Safari view
-- Swipe left on a story to read its threaded comments natively in the app
-  (fetched in one request via the [Algolia HN API](https://hn.algolia.com/api))
+- Top 50 stories with points, author, age, and domain
+- Tap a story to read the article in an in-app Safari view; tap the orange
+  bubble to read its comments
+- Comments use drill-down navigation: every screen shows one level of replies
+  at full width, and a comment's "N replies" chip pushes a screen with that
+  comment pinned on top for context — no squeezed indentation, back-swipe to
+  go up a level (fetched in one request via the
+  [Algolia HN API](https://hn.algolia.com/api))
+- Links inside comments open in the in-app Safari view
 - Pull to refresh
 
 That's it.

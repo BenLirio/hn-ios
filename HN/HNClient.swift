@@ -40,37 +40,34 @@ enum HNClient {
 
     // Fetched via the Algolia HN API: one request returns the whole comment tree,
     // instead of one Firebase request per comment.
-    static func comments(storyID: Int) async throws -> [Comment] {
+    static func comments(storyID: Int) async throws -> [CommentNode] {
         let url = URL(string: "https://hn.algolia.com/api/v1/items/\(storyID)")!
         let (data, _) = try await URLSession.shared.data(from: url)
         let root = try JSONDecoder().decode(AlgoliaItem.self, from: data)
-        return flatten(root.children, depth: 0)
-    }
-
-    private static func flatten(_ items: [AlgoliaItem], depth: Int) -> [Comment] {
-        items.flatMap { item -> [Comment] in
-            guard let author = item.author, let text = item.text else { return [] }
-            let comment = Comment(
-                id: item.id,
-                author: author,
-                text: AttributedString(html: text),
-                time: item.created_at_i,
-                depth: depth
-            )
-            return [comment] + flatten(item.children, depth: depth + 1)
-        }
+        return root.children.compactMap(CommentNode.init)
     }
 }
 
-struct Comment: Identifiable {
+struct CommentNode: Identifiable, Hashable {
     let id: Int
     let author: String
     let text: AttributedString
     let time: TimeInterval
-    let depth: Int
+    let children: [CommentNode]
+    let descendantCount: Int
+
+    init?(item: AlgoliaItem) {
+        guard let author = item.author, let text = item.text else { return nil }
+        self.id = item.id
+        self.author = author
+        self.text = AttributedString(html: text)
+        self.time = item.created_at_i
+        self.children = item.children.compactMap(CommentNode.init)
+        self.descendantCount = children.count + children.reduce(0) { $0 + $1.descendantCount }
+    }
 }
 
-private struct AlgoliaItem: Decodable {
+struct AlgoliaItem: Decodable {
     let id: Int
     let author: String?
     let text: String?

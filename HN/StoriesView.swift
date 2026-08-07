@@ -16,21 +16,17 @@ struct StoriesView: View {
                     ProgressView()
                 } else {
                     List(stories) { story in
-                        StoryRow(story: story)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
+                        StoryRow(
+                            story: story,
+                            openArticle: {
                                 if story.url != nil {
                                     presentedURL = IdentifiableURL(url: story.articleURL)
                                 } else {
                                     commentsStory = story
                                 }
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button("Comments", systemImage: "bubble.right") {
-                                    commentsStory = story
-                                }
-                                .tint(.orange)
-                            }
+                            },
+                            openComments: { commentsStory = story }
+                        )
                     }
                     .listStyle(.plain)
                 }
@@ -38,7 +34,7 @@ struct StoriesView: View {
             .navigationTitle("Hacker News")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $commentsStory) { story in
-                CommentsView(story: story)
+                ThreadRootView(story: story)
             }
         }
         .task { await load() }
@@ -60,21 +56,43 @@ struct StoriesView: View {
 
 struct StoryRow: View {
     let story: Story
+    let openArticle: () -> Void
+    let openComments: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(story.title)
-                .font(.subheadline.weight(.medium))
-            Text(meta)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: openArticle) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(story.title)
+                        .font(.subheadline.weight(.medium))
+                    Text(meta)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button(action: openComments) {
+                VStack(spacing: 2) {
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.footnote)
+                    Text("\(story.descendants ?? 0)")
+                        .font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(.orange)
+                .frame(minWidth: 40)
+                .padding(.vertical, 6)
+                .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.borderless)
         }
         .padding(.vertical, 2)
     }
 
     private var meta: String {
         var parts = ["\(story.score) points", story.by, age]
-        if let comments = story.descendants { parts.append("\(comments) comments") }
         if let domain = story.domain { parts.append(domain) }
         return parts.joined(separator: " · ")
     }
