@@ -5,6 +5,7 @@ struct StoriesView: View {
     @State private var stories: [Story] = []
     @State private var error: String?
     @State private var presentedURL: IdentifiableURL?
+    @State private var commentsStory: Story?
 
     var body: some View {
         NavigationStack {
@@ -17,10 +18,16 @@ struct StoriesView: View {
                     List(stories) { story in
                         StoryRow(story: story)
                             .contentShape(Rectangle())
-                            .onTapGesture { presentedURL = IdentifiableURL(url: story.articleURL) }
+                            .onTapGesture {
+                                if story.url != nil {
+                                    presentedURL = IdentifiableURL(url: story.articleURL)
+                                } else {
+                                    commentsStory = story
+                                }
+                            }
                             .swipeActions(edge: .trailing) {
                                 Button("Comments", systemImage: "bubble.right") {
-                                    presentedURL = IdentifiableURL(url: story.commentsURL)
+                                    commentsStory = story
                                 }
                                 .tint(.orange)
                             }
@@ -30,6 +37,9 @@ struct StoriesView: View {
             }
             .navigationTitle("Hacker News")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(item: $commentsStory) { story in
+                CommentsView(story: story)
+            }
         }
         .task { await load() }
         .refreshable { await load() }
