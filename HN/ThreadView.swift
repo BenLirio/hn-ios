@@ -33,6 +33,10 @@ struct ThreadRootView: View {
                 .buttonStyle(.plain)
             }
 
+            Section {
+                SummaryCell(storyID: story.id)
+            }
+
             if let comments {
                 if comments.isEmpty {
                     Text("No comments yet")
@@ -88,6 +92,71 @@ struct ThreadView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $pushed) { ThreadView(node: $0) }
         .openLinksInApp(presenting: $presentedURL)
+    }
+}
+
+struct SummaryCell: View {
+    let storyID: Int
+    @State private var state = SummaryState.idle
+
+    enum SummaryState {
+        case idle, loading, loaded(AttributedString), failed(String)
+    }
+
+    var body: some View {
+        switch state {
+        case .idle:
+            Button {
+                Task { await load() }
+            } label: {
+                Label("Summarize article & comments", systemImage: "sparkles")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.orange)
+            }
+            .buttonStyle(.borderless)
+        case .loading:
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Summarizing — first time can take a minute…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .loaded(let summary):
+            VStack(alignment: .leading, spacing: 6) {
+                Label("AI Summary", systemImage: "sparkles")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text(summary)
+                    .font(.subheadline)
+            }
+            .padding(.vertical, 4)
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Retry", systemImage: "arrow.clockwise") {
+                    Task { await load() }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private func load() async {
+        state = .loading
+        do {
+            let raw = try await HNClient.summary(storyID: storyID)
+            let markdown = raw
+                .replacingOccurrences(of: "ARTICLE:", with: "**Article**")
+                .replacingOccurrences(of: "DISCUSSION:", with: "**Discussion**")
+            let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            state = .loaded((try? AttributedString(markdown: markdown, options: options)) ?? AttributedString(raw))
+        } catch {
+            state = .failed("Couldn't reach the summary server (is the Mac mini on Tailscale?): \(error.localizedDescription)")
+        }
     }
 }
 

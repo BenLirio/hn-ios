@@ -15,6 +15,26 @@ A super minimal iOS Hacker News reader — a thin SwiftUI wrapper around the
   [Algolia HN API](https://hn.algolia.com/api))
 - Links inside comments open in the in-app Safari view
 - Pull to refresh
+- "Summarize article & comments" button: an AI summary served by a personal
+  summary server (see below)
+
+## Summary server
+
+`server/server.py` is a zero-dependency Python 3 server meant to run on a
+Mac on the same Tailscale tailnet. `GET /summary/<story_id>` renders the
+article in headless Chrome (`--headless --dump-dom`, so JS-heavy pages work),
+pulls the comment tree from Algolia, summarizes both with OpenAI
+(`gpt-5-mini`), and caches the result in `server/cache/`.
+
+Setup on the server machine:
+
+1. Put an OpenAI API key in `server/openai_key` (gitignored, `chmod 600`)
+2. Run it as a launchd service (label `com.benlirio.hn-summary`) pointing at
+   `python3 server/server.py`; it listens on port 8434
+3. The app reaches it at `http://bens-mac-mini.tailab3f3c.ts.net:8434` — the
+   Tailscale MagicDNS name is hardcoded in `HNClient.summaryBase`, and
+   `Info.plist` carries an App Transport Security exception for `ts.net`
+   (plain HTTP inside the tailnet)
 
 That's it.
 

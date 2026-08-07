@@ -3,3 +3,6 @@ build/
 DerivedData/
 xcuserdata/
 *.xcuserstate
+server/openai_key
+server/cache/
+server/server.log

@@ -38,6 +38,24 @@ enum HNClient {
         return try JSONDecoder().decode(Story.self, from: data)
     }
 
+    // Personal summary server (server/ in this repo) running on the Mac mini,
+    // reachable over Tailscale. Cold summaries take up to a minute or two.
+    static let summaryBase = URL(string: "http://bens-mac-mini.tailab3f3c.ts.net:8434")!
+
+    static func summary(storyID: Int) async throws -> String {
+        var request = URLRequest(url: summaryBase.appending(path: "summary/\(storyID)"))
+        request.timeoutInterval = 180
+        let (data, response) = try await URLSession.shared.data(for: request)
+        struct SummaryResponse: Decodable { let summary: String?; let error: String? }
+        let decoded = try JSONDecoder().decode(SummaryResponse.self, from: data)
+        guard (response as? HTTPURLResponse)?.statusCode == 200, let summary = decoded.summary else {
+            throw NSError(domain: "HN", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: decoded.error ?? "Summary server error",
+            ])
+        }
+        return summary
+    }
+
     // Fetched via the Algolia HN API: one request returns the whole comment tree,
     // instead of one Firebase request per comment.
     static func comments(storyID: Int) async throws -> [CommentNode] {
