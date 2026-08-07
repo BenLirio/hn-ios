@@ -109,7 +109,7 @@ def chrome_dump(url):
             ],
             capture_output=True,
             text=True,
-            timeout=45,
+            timeout=25,
         )
     text = html_to_text(result.stdout)[:ARTICLE_CHAR_LIMIT]
     if not text.strip():
