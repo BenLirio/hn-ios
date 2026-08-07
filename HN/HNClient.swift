@@ -50,7 +50,9 @@ enum HNClient {
     }
 
     static func explainerStatus(storyID: Int) async throws -> ExplainerStatus {
-        let (data, _) = try await URLSession.shared.data(from: serverBase.appending(path: "explainer/\(storyID)"))
+        var request = URLRequest(url: serverBase.appending(path: "explainer/\(storyID)"))
+        request.timeoutInterval = 10
+        let (data, _) = try await URLSession.shared.data(for: request)
         struct Response: Decodable { let status: String; let stage: String?; let error: String? }
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         switch decoded.status {

@@ -15,8 +15,10 @@ cached on disk per story.
 Stdlib only — no dependencies. Run: python3 server.py
 """
 
+import datetime
 import json
 import re
+import socket
 import subprocess
 import tempfile
 import threading
@@ -340,9 +342,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, fmt, *args):
-        print(f"{self.address_string()} {fmt % args}", flush=True)
+        now = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"{now} {self.address_string()} {fmt % args}", flush=True)
+
+
+class DualStackServer(ThreadingHTTPServer):
+    """Listen on both IPv6 and IPv4 — MagicDNS may hand clients either."""
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
 
 
 if __name__ == "__main__":
     print(f"HN explainer server on :{PORT} (big={BIG_MODEL}, small={SMALL_MODEL})", flush=True)
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    DualStackServer(("::", PORT), Handler).serve_forever()
