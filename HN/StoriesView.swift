@@ -6,6 +6,8 @@ struct StoriesView: View {
     @State private var error: String?
     @State private var presentedURL: IdentifiableURL?
     @State private var commentsStory: Story?
+    @State private var serverError: String??  // nil = checking, .some(nil) = ok, .some(msg) = down
+    @State private var showServerAlert = false
 
     var body: some View {
         NavigationStack {
@@ -33,14 +35,51 @@ struct StoriesView: View {
             }
             .navigationTitle("Hacker News")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showServerAlert = true
+                        Task { serverError = await HNClient.healthCheck() }
+                    } label: {
+                        Image(systemName: "circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(serverDotColor)
+                    }
+                    .accessibilityLabel("Explainer server status")
+                }
+            }
+            .alert("Explainer Server", isPresented: $showServerAlert) {
+                Button("OK") {}
+            } message: {
+                Text(serverAlertMessage)
+            }
             .navigationDestination(item: $commentsStory) { story in
                 ThreadRootView(story: story)
             }
         }
-        .task { await load() }
+        .task {
+            serverError = await HNClient.healthCheck()
+            await load()
+        }
         .refreshable { await load() }
         .fullScreenCover(item: $presentedURL) { item in
             SafariView(url: item.url).ignoresSafeArea()
+        }
+    }
+
+    private var serverDotColor: Color {
+        switch serverError {
+        case .none: return .gray
+        case .some(nil): return .green
+        case .some(.some): return .red
+        }
+    }
+
+    private var serverAlertMessage: String {
+        switch serverError {
+        case .none: return "Checking \(HNClient.serverBase.absoluteString)…"
+        case .some(nil): return "Connected to \(HNClient.serverBase.absoluteString)"
+        case .some(.some(let message)): return "Can't reach \(HNClient.serverBase.absoluteString)\n\n\(message)"
         }
     }
 

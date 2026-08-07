@@ -1,4 +1,14 @@
 import Foundation
+import os
+
+// Network instrumentation: shows up in Xcode/devicectl console (print) and
+// in Console.app / `log stream` under subsystem com.benlirio.hn (Logger).
+let netLogger = Logger(subsystem: "com.benlirio.hn", category: "net")
+
+func netlog(_ message: String) {
+    print("[net] \(message)")
+    netLogger.info("\(message, privacy: .public)")
+}
 
 struct Story: Identifiable, Hashable, Decodable {
     let id: Int
@@ -43,25 +53,69 @@ enum HNClient {
     // app polls status until the interactive page is ready.
     static let serverBase = URL(string: "http://bens-mac-mini.tailab3f3c.ts.net:8434")!
 
+    struct Progress {
+        let stage: String
+        let step: Int
+        let steps: Int
+        let elapsed: Int
+    }
+
     enum ExplainerStatus {
-        case working(String)
+        case working(Progress)
         case ready(URL)
         case failed(String)
     }
 
     static func explainerStatus(storyID: Int) async throws -> ExplainerStatus {
-        var request = URLRequest(url: serverBase.appending(path: "explainer/\(storyID)"))
+        let url = serverBase.appending(path: "explainer/\(storyID)")
+        var request = URLRequest(url: url)
         request.timeoutInterval = 10
-        let (data, _) = try await URLSession.shared.data(for: request)
-        struct Response: Decodable { let status: String; let stage: String?; let error: String? }
-        let decoded = try JSONDecoder().decode(Response.self, from: data)
-        switch decoded.status {
-        case "ready":
-            return .ready(serverBase.appending(path: "explainer/\(storyID)/html"))
-        case "working":
-            return .working(decoded.stage ?? "working")
-        default:
-            return .failed(decoded.error ?? "Unknown server error")
+        netlog("GET \(url.absoluteString)")
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            struct Response: Decodable {
+                let status: String
+                let stage: String?
+                let step: Int?
+                let steps: Int?
+                let elapsed: Int?
+                let error: String?
+            }
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+            netlog("explainer/\(storyID) -> \(decoded.status) \(decoded.stage ?? decoded.error ?? "")")
+            switch decoded.status {
+            case "ready":
+                return .ready(serverBase.appending(path: "explainer/\(storyID)/html"))
+            case "working":
+                return .working(Progress(
+                    stage: decoded.stage ?? "working",
+                    step: decoded.step ?? 1,
+                    steps: decoded.steps ?? 5,
+                    elapsed: decoded.elapsed ?? 0
+                ))
+            default:
+                return .failed(decoded.error ?? "Unknown server error")
+            }
+        } catch {
+            netlog("explainer/\(storyID) FAILED: \(error)")
+            throw error
+        }
+    }
+
+    /// Returns nil when the server is reachable, else a description of what failed.
+    static func healthCheck() async -> String? {
+        let url = serverBase.appending(path: "health")
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+        netlog("GET \(url.absoluteString)")
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            netlog("health -> HTTP \(code)")
+            return code == 200 ? nil : "Server returned HTTP \(code)"
+        } catch {
+            netlog("health FAILED: \(error)")
+            return error.localizedDescription
         }
     }
 

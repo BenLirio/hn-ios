@@ -22,6 +22,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
@@ -41,8 +42,9 @@ DIGEST_THRESHOLD = 14000     # below this, comments go to the big model raw
 CHUNK_CHARS = 18000          # target size of each comment chunk to digest
 
 _lock = threading.Lock()
-_jobs = {}    # story_id -> stage string (generation in flight)
+_jobs = {}    # story_id -> {"stage": str, "step": int, "started": float}
 _errors = {}  # story_id -> error string from the last attempt
+TOTAL_STEPS = 5
 
 
 # ---------- text extraction ----------
@@ -190,7 +192,7 @@ def digest_comments(story_id, threads, set_stage):
 
     def digest(i_chunk):
         i, chunk = i_chunk
-        set_stage(f"digesting comments (batch {i + 1}/{len(chunks)})")
+        set_stage(f"digesting comments (batch {i + 1}/{len(chunks)})", 4)
         return chat(
             SMALL_MODEL,
             "Compress this portion of a Hacker News comment thread into a dense digest "
@@ -241,25 +243,28 @@ HN discussion ({comment_count} comments{digested_note}):
 
 
 def generate(story_id):
-    def set_stage(stage):
+    started = time.time()
+
+    def set_stage(stage, step):
         with _lock:
-            _jobs[story_id] = stage
-        print(f"[{story_id}] {stage}", flush=True)
+            _jobs[story_id] = {"stage": stage, "step": step, "started": started}
+        elapsed = int(time.time() - started)
+        print(f"{datetime.datetime.now():%H:%M:%S} [{story_id}] ({elapsed}s) {stage}", flush=True)
 
     try:
-        set_stage("fetching story")
+        set_stage("fetching story", 2)
         story = fetch_story(story_id)
         title = story.get("title", "")
 
         article_text = ""
         if story.get("url"):
-            set_stage("rendering article in Chrome")
+            set_stage("rendering article in Chrome", 3)
             try:
                 article_text = fetch_article_text(story["url"])
             except Exception as e:
                 print(f"[{story_id}] article fetch failed: {e}", flush=True)
         if len(article_text) > 20000:
-            set_stage("condensing long article")
+            set_stage("condensing long article", 3)
             article_text = chat(
                 SMALL_MODEL,
                 "Condense this article to at most 1200 words, keeping every key idea, "
@@ -273,7 +278,7 @@ def generate(story_id):
         comments = digest_comments(story_id, threads, set_stage)
         digested = comments and comments.startswith("[Digest")
 
-        set_stage("designing the page")
+        set_stage("designing the page", 5)
         html = chat(
             BIG_MODEL,
             PAGE_PROMPT.format(
@@ -320,14 +325,22 @@ class Handler(BaseHTTPRequestHandler):
             if (CACHE_DIR / f"{story_id}.html").exists():
                 return self._send_json(200, {"status": "ready", "path": f"/explainer/{story_id}/html"})
             with _lock:
-                if story_id in _jobs:
-                    return self._send_json(200, {"status": "working", "stage": _jobs[story_id]})
+                job = _jobs.get(story_id)
+                if job:
+                    return self._send_json(200, {
+                        "status": "working",
+                        "stage": job["stage"],
+                        "step": job["step"],
+                        "steps": TOTAL_STEPS,
+                        "elapsed": int(time.time() - job["started"]),
+                    })
                 error = _errors.pop(story_id, None)
                 if error:
                     return self._send_json(200, {"status": "error", "error": error})
-                _jobs[story_id] = "starting"
+                _jobs[story_id] = {"stage": "starting", "step": 1, "started": time.time()}
             threading.Thread(target=generate, args=(story_id,), daemon=True).start()
-            return self._send_json(200, {"status": "working", "stage": "starting"})
+            return self._send_json(200, {"status": "working", "stage": "starting",
+                                         "step": 1, "steps": TOTAL_STEPS, "elapsed": 0})
 
         self._send_json(404, {"error": "not found"})
 

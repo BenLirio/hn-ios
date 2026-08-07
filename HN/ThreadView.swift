@@ -104,7 +104,7 @@ struct ExplainerCell: View {
     @State private var pollTask: Task<Void, Never>?
 
     enum ExplainerState {
-        case idle, working(String), ready(URL), failed(String)
+        case idle, working(HNClient.Progress), ready(URL), failed(String)
     }
 
     var body: some View {
@@ -117,13 +117,24 @@ struct ExplainerCell: View {
                         .foregroundStyle(.orange)
                 }
                 .buttonStyle(.borderless)
-            case .working(let stage):
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text("Building your explainer: \(stage)…")
+            case .working(let progress):
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label("Building your explainer", systemImage: "sparkles")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Text(elapsedText(progress.elapsed))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    ProgressView(value: Double(progress.step), total: Double(progress.steps))
+                        .tint(.orange)
+                    Text("Step \(progress.step)/\(progress.steps): \(progress.stage)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .padding(.vertical, 4)
             case .ready(let url):
                 Button {
                     pageURL = IdentifiableURL(url: url)
@@ -151,8 +162,12 @@ struct ExplainerCell: View {
         .onDisappear { pollTask?.cancel() }
     }
 
+    private func elapsedText(_ seconds: Int) -> String {
+        seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
+    }
+
     private func startPolling() {
-        state = .working("starting")
+        state = .working(HNClient.Progress(stage: "contacting server", step: 1, steps: 5, elapsed: 0))
         pollTask?.cancel()
         pollTask = Task {
             while !Task.isCancelled {
@@ -162,8 +177,8 @@ struct ExplainerCell: View {
                         state = .ready(url)
                         pageURL = IdentifiableURL(url: url)
                         return
-                    case .working(let stage):
-                        state = .working(stage)
+                    case .working(let progress):
+                        state = .working(progress)
                     case .failed(let message):
                         state = .failed(message)
                         return
@@ -172,7 +187,7 @@ struct ExplainerCell: View {
                     state = .failed("Couldn't reach the Mac mini (is Tailscale connected?): \(error.localizedDescription)")
                     return
                 }
-                try? await Task.sleep(for: .seconds(4))
+                try? await Task.sleep(for: .seconds(3))
             }
         }
     }
